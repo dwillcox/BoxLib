@@ -31,10 +31,14 @@ contains
     real(kind=dp_t), pointer :: sp(:,:,:,:)
     integer        , pointer :: mp(:,:,:,:)
     integer :: i, n, ng, nn, stat, npts
-    integer :: lo(mgt%dim)
+    integer :: lo(mgt%dim), hi(mgt%dim)
     type(bl_prof_timer), save :: bpt
     logical :: pmask(mgt%dim), singular_test
     real(kind=dp_t) :: local_eps
+
+    type(mfiter) :: mfi
+    type(box) :: tilebox
+    integer :: gridlo(mgt%dim), gridhi(mgt%dim)
 
     call bl_proffortfuncstart("cc_mg_tower_smoother")
 
@@ -103,65 +107,91 @@ contains
           
           do nn = 0, 1
              call fill_boundary(uu, cross = mgt%lcross)
-             do i = 1, nfabs(ff)
+
+             !$omp parallel private(i,mfi,tilebox,up,fp,sp,mp,lo,hi,gridlo,gridhi,n)
+
+             ! it could be thread unsafe if the tilesize is less than 3 due to skewed stencil
+             call mfiter_build(mfi, ff, tiling=.true., tilesize=(/1024,4,4/))
+
+             do while (more_tile(mfi))
+                i = get_fab_index(mfi)
+
+                tilebox = get_tilebox(mfi)
+                lo = lwb(tilebox)
+                hi = upb(tilebox)
+
                 up => dataptr(uu, i)
                 fp => dataptr(ff, i)
                 sp => dataptr(ss, i)
                 mp => dataptr(mm, i)
-                lo =  lwb(get_box(ss, i))
+
+                gridlo =  lwb(get_box(ss, i))
+                gridhi =  upb(get_box(ss, i))
+
                 do n = 1, mgt%nc
                    select case ( mgt%dim)
                    case (1)
-                      call gs_rb_smoother_1d(sp(:,:,1,1), up(:,1,1,n), &
-                           fp(:,1,1,n), mp(:,1,1,1), lo, ng, nn, &
+                      call gs_rb_smoother_1d(lo, hi, sp(:,:,1,1), up(:,1,1,n), &
+                           fp(:,1,1,n), mp(:,1,1,1), gridlo, gridhi, ng, mgt%ns, nn, &
                            mgt%skewed(lev,i))
                    case (2)
-                      call gs_rb_smoother_2d(sp(:,:,:,1), up(:,:,1,n), &
-                           fp(:,:,1,n), mp(:,:,1,1), lo, ng, nn, &
+                      call gs_rb_smoother_2d(lo, hi, sp(:,:,:,1), up(:,:,1,n), &
+                           fp(:,:,1,n), mp(:,:,1,1), gridlo, gridhi, ng, mgt%ns, nn, &
                            mgt%skewed(lev,i))
                    case (3)
-                      call gs_rb_smoother_3d(sp(:,:,:,:), up(:,:,:,n), &
-                           fp(:,:,:,n), mp(:,:,:,1), lo, ng, nn, &
+                      call gs_rb_smoother_3d(lo, hi, sp(:,:,:,:), up(:,:,:,n), &
+                           fp(:,:,:,n), mp(:,:,:,1), gridlo, gridhi, ng, mgt%ns, nn, &
                            mgt%skewed(lev,i))
                    end select
                 end do
              end do
+             !$omp end parallel
           end do
           
        case ( MG_SMOOTHER_EFF_RB )
-          
+
           call fill_boundary(uu, cross = mgt%lcross)
-          do i = 1, nfabs(ff)
-             up => dataptr(uu, i)
-             fp => dataptr(ff, i)
-             sp => dataptr(ss, i)
-             mp => dataptr(mm, i)
-             lo =  lwb(get_box(ss, i))
-             do n = 1, mgt%nc
-                select case ( mgt%dim)
-                case (1)
-                   call gs_rb_smoother_1d(sp(:,:,1,1), up(:,1,1,n), &
-                        fp(:,1,1,n), mp(:,1,1,1), lo, ng, 0, &
-                        mgt%skewed(lev,i))
-                   call gs_rb_smoother_1d(sp(:,:,1,1), up(:,1,1,n), &
-                        fp(:,1,1,n), mp(:,1,1,1), lo, ng, 1, &
-                        mgt%skewed(lev,i))
-                case (2)
-                   call gs_rb_smoother_2d(sp(:,:,:,1), up(:,:,1,n), &
-                        fp(:,:,1,n), mp(:,:,1,1), lo, ng, 0, &
-                        mgt%skewed(lev,i))
-                   call gs_rb_smoother_2d(sp(:,:,:,1), up(:,:,1,n), &
-                        fp(:,:,1,n), mp(:,:,1,1), lo, ng, 1, &
-                        mgt%skewed(lev,i))
-                case (3)
-                   call gs_rb_smoother_3d(sp(:,:,:,:), up(:,:,:,n), &
-                        fp(:,:,:,n), mp(:,:,:,1), lo, ng, 0, &
-                        mgt%skewed(lev,i))
-                   call gs_rb_smoother_3d(sp(:,:,:,:), up(:,:,:,n), &
-                        fp(:,:,:,n), mp(:,:,:,1), lo, ng, 1, &
-                        mgt%skewed(lev,i))
-                end select
+
+          do nn = 0, 1
+
+             !$omp parallel private(i,mfi,tilebox,up,fp,sp,mp,lo,hi,gridlo,gridhi,n)
+
+             ! it could be thread unsafe if the tilesize is less than 3 due to skewed stencil
+             call mfiter_build(mfi, ff, tiling=.true., tilesize=(/1024,4,4/))
+
+             do while (more_tile(mfi))
+                i = get_fab_index(mfi)
+
+                tilebox = get_tilebox(mfi)
+                lo = lwb(tilebox)
+                hi = upb(tilebox)
+
+                up => dataptr(uu, i)
+                fp => dataptr(ff, i)
+                sp => dataptr(ss, i)
+                mp => dataptr(mm, i)
+
+                gridlo =  lwb(get_box(ss, i))
+                gridhi =  upb(get_box(ss, i))
+
+                do n = 1, mgt%nc
+                   select case ( mgt%dim)
+                   case (1)
+                      call gs_rb_smoother_1d(lo, hi, sp(:,:,1,1), up(:,1,1,n), &
+                           fp(:,1,1,n), mp(:,1,1,1), gridlo, gridhi, ng, mgt%ns, nn, &
+                           mgt%skewed(lev,i))
+                   case (2)
+                      call gs_rb_smoother_2d(lo, hi, sp(:,:,:,1), up(:,:,1,n), &
+                           fp(:,:,1,n), mp(:,:,1,1), gridlo, gridhi, ng, mgt%ns, nn, &
+                           mgt%skewed(lev,i))
+                   case (3)
+                      call gs_rb_smoother_3d(lo, hi, sp(:,:,:,:), up(:,:,:,n), &
+                           fp(:,:,:,n), mp(:,:,:,1), gridlo, gridhi, ng, mgt%ns, nn, &
+                           mgt%skewed(lev,i))
+                   end select
+                end do
              end do
+             !$omp end parallel
           end do
           
        case ( MG_SMOOTHER_MINION_CROSS )
