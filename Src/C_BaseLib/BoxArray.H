@@ -92,16 +92,6 @@ public:
     //
     ~BoxArray ();
     //
-    // BoxArray can be used like an const STL container.
-    // We ONLY supply const_iterators.  We do this because
-    // BoxArrays are reference counted and we don't want folks
-    // to modify without going through the non-STL BoxArray interface.
-    //
-    typedef Array<Box>::const_iterator const_iterator;
-
-    const_iterator begin () const { return m_ref->m_abox.begin(); }
-    const_iterator   end () const { return m_ref->m_abox.end();   }
-    //
     // Initialize the BoxArray from a single box.
     // It is an error if the BoxArray has already been initialized.
     //
@@ -213,7 +203,7 @@ public:
     //
     // Applies Box::convert(IndexType) to each Box in the BoxArray.
     //
-    BoxArray& convert (IndexType typ);
+    BoxArray& convert (IndexType m_typ);
     //
     // Applies function (*fp)(Box) to each Box in the BoxArray.
     //
@@ -244,11 +234,25 @@ public:
     //
     // Returns element index of this BoxArray.
     //
-    const Box& operator[] (int index) const { return m_ref->m_abox.get(index); }
+    Box operator[] (int index) const { 
+	Box b = m_ref->m_abox[index];
+	b.convert(m_typ); 
+	return b;
+    }
     //
     // Returns element index of this BoxArray.
     //
-    const Box& get (int index) const { return m_ref->m_abox.get(index); }
+    Box get (int index) const {
+	Box b = m_ref->m_abox[index];
+	b.convert(m_typ); 
+	return b;
+    }
+    //
+    // Returns cell-centered element index of this BoxArray.
+    //
+    const Box& getCellCenteredBox (int index) const {
+	return m_ref->m_abox[index];
+    }    
     //
     // Returns true if Box is valid and they all have the same
     // IndexType.  Is true by default if the BoxArray is empty.
@@ -299,13 +303,14 @@ public:
     // Also tries to "simplify" the BoxArray within reason.
     //
     void removeOverlap ();
-
-    static bool SameRefs (const BoxArray& lhs, const BoxArray& rhs) { return lhs.m_ref == rhs.m_ref; }
-
     //
     // This gives a unique ID of the reference
     //
     ptrdiff_t getRefID () const;
+
+    const IndexType& ixType () const { return m_typ; }
+
+    static bool SameRefs (const BoxArray& lhs, const BoxArray& rhs) { return lhs.m_ref == rhs.m_ref; }
 
 #ifdef BL_USE_MPI
     static void SendBoxArrayToSidecars(BoxArray *ba);
@@ -313,7 +318,14 @@ public:
 
 private:
 
+    //
+    //  Update BoxArray index type according the box type, and then convert boxes to cell-centered.
+    //
+    void type_update ();
+
     void decrementCounters () const;
+
+    IndexType m_typ;
 
     class Ref
     {

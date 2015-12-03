@@ -168,10 +168,6 @@ class DistributionMapping
 
     static void Finalize ();
 
-    static bool SameRefs (const DistributionMapping& lhs,
-                          const DistributionMapping& rhs)
-		  { return lhs.m_ref == rhs.m_ref; }
-
     static void PrintDiagnostics(const std::string &filename);
     //
     // Initialize the topological proximity map

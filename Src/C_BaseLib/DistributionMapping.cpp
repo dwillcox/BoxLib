@@ -1102,14 +1102,16 @@ void
 DistributionMapping::SFCProcessorMap (const BoxArray& boxes,
                                       int             nprocs)
 {
-    BL_ASSERT(boxes.size() > 0);
+    const int N = boxes.size();
 
-    if (m_ref->m_pmap.size() != boxes.size() + 1)
+    BL_ASSERT(N > 0);
+
+    if (m_ref->m_pmap.size() != N + 1)
     {
-        m_ref->m_pmap.resize(boxes.size()+1);
+        m_ref->m_pmap.resize(N+1);
     }
 
-    if (boxes.size() < sfc_threshold*nprocs)
+    if (N < sfc_threshold*nprocs)
     {
         KnapSackProcessorMap(boxes,nprocs);
     }
@@ -1117,11 +1119,11 @@ DistributionMapping::SFCProcessorMap (const BoxArray& boxes,
     {
         std::vector<long> wgts;
 
-        wgts.reserve(boxes.size());
+        wgts.reserve(N);
 
-        for (BoxArray::const_iterator it = boxes.begin(), End = boxes.end(); it != End; ++it)
-        {
-            wgts.push_back(it->volume());
+	for (int i = 0; i < N; ++i)
+	{
+            wgts.push_back(boxes[i].volume());
         }
 
         SFCProcessorMapDoIt(boxes,wgts,nprocs);
@@ -1485,18 +1487,20 @@ void
 DistributionMapping::PFCProcessorMap (const BoxArray& boxes,
                                       int             nprocs)
 {
-    BL_ASSERT(boxes.size() > 0);
+    const int N = boxes.size();
 
-    if (m_ref->m_pmap.size() != boxes.size() + 1) {
-        m_ref->m_pmap.resize(boxes.size()+1);
+    BL_ASSERT(N > 0);
+
+    if (m_ref->m_pmap.size() != N + 1) {
+        m_ref->m_pmap.resize(N+1);
     }
 
     std::vector<long> wgts;
-    wgts.reserve(boxes.size());
+    wgts.reserve(N);
 
-    for (BoxArray::const_iterator it = boxes.begin(), End = boxes.end(); it != End; ++it)
+    for (int i = 0; i < N; ++i)
     {
-      wgts.push_back(it->numPts());
+	wgts.push_back(boxes[i].numPts());
     }
     PFCProcessorMapDoIt(boxes,wgts,nprocs);
 }
