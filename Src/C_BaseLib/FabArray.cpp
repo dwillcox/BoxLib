@@ -155,8 +155,12 @@ FabArrayBase::CPC::~CPC ()
 bool
 FabArrayBase::CPC::operator== (const CPC& rhs) const
 {
+#if 0
     return
         m_dstba == rhs.m_dstba && m_srcba == rhs.m_srcba && m_dstdm == rhs.m_dstdm && m_srcdm == rhs.m_srcdm;
+#else
+    return false;
+#endif
 }
 
 int
@@ -470,8 +474,12 @@ FabArrayBase::SI::~SI ()
 bool
 FabArrayBase::SI::operator== (const SI& rhs) const
 {
+#if 0
     return
         m_ngrow == rhs.m_ngrow && m_cross == rhs.m_cross && m_ba == rhs.m_ba && m_dm == rhs.m_dm;
+#else
+    return false;
+#endif
 }
 
 int
