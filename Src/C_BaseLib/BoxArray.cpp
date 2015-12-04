@@ -554,9 +554,9 @@ BoxArray::isDisjoint () const
     const int N = size();
     for (int i = 0; i < N; ++i)
     {
-        intersections(get(i),isects);
-
-        if ( !(isects.size() == 1 && isects[0].second == get(i)) )
+	const Box& bx = get(i);
+        intersections(bx,isects);
+        if ( !(isects.size() == 1 && isects[0].second == bx) )
         {
             return false;
         }
