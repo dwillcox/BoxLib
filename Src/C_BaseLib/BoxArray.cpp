@@ -572,9 +572,7 @@ BoxArray::ok () const
 
     if (size() > 0)
     {
-        const Box& bx0 = get(0);
-
-        if (size() == 1) isok = bx0.ok();
+        if (size() == 1) isok = get(0).ok();
 
         for (int i = 1, N = size(); i < N && isok; i++)
         {
@@ -743,7 +741,8 @@ BoxLib::GetBndryCells (const BoxArray& ba,
     //
     const IndexType btype = ba.ixType();
 
-    BoxList bcells = ba.boxList(), gcells(btype), leftover(btype);
+    BoxList bcells = ba.boxList();
+    BoxList gcells(btype);
 
     bcells.simplify();
 
@@ -758,6 +757,7 @@ BoxLib::GetBndryCells (const BoxArray& ba,
 
 	gcells.catenate(bcells);
     }
+    // Note that BoxLib::catenate clears out bcells.
     //
     // Now strip out intersections with original BoxArray.
     //
@@ -776,7 +776,7 @@ BoxLib::GetBndryCells (const BoxArray& ba,
             //
             // Collect all the intersection pieces.
             //
-            BoxList pieces(btype);
+            BoxList pieces(btype), leftover(btype);
             for (int i = 0, N = isects.size(); i < N; i++)
                 pieces.push_back(isects[i].second);
             leftover = BoxLib::complementIn(*it,pieces);
