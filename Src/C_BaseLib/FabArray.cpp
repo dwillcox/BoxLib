@@ -1142,12 +1142,15 @@ Box
 MFIter::tilebox () const
 { 
     Box bx(pta->tileArray[currentIndex]);
-    bx.convert(typ);
-    const IntVect& Big = validbox().bigEnd();
-    for (int d=0; d<BL_SPACEDIM; ++d) {
-	if (typ.nodeCentered(d)) { // validbox should also be nodal in d-direction.
-	    if (bx.bigEnd(d) < Big[d]) {
-		bx.growHi(d,-1);
+    if (! typ.cellCentered())
+    {
+	bx.convert(typ);
+	const IntVect& Big = validbox().bigEnd();
+	for (int d=0; d<BL_SPACEDIM; ++d) {
+	    if (typ.nodeCentered(d)) { // validbox should also be nodal in d-direction.
+		if (bx.bigEnd(d) < Big[d]) {
+		    bx.growHi(d,-1);
+		}
 	    }
 	}
     }
@@ -1161,11 +1164,11 @@ MFIter::nodaltilebox (int dir) const
     bx.convert(typ);
     const IntVect& Big = validbox().bigEnd();
     int d0, d1;
-    if (dir >= 0 && dir <= BL_SPACEDIM-1) {
-	d0 = d1 = dir;
-    } else {
+    if (dir < 0) {
 	d0 = 0;
 	d1 = BL_SPACEDIM-1;
+    } else {
+	d0 = d1 = dir;
     }
     for (int d=d0; d<=d1; ++d) {
 	if (typ.cellCentered(d)) { // validbox should also be cell-centered in d-direction.
@@ -1205,7 +1208,7 @@ MFIter::grownnodaltilebox (int dir, int ng) const
     if (ng > 0) {
 	const Box& vbx = validbox();
 	for (int d=0; d<BL_SPACEDIM; ++d) {
-	    if (bx.smallEnd(d) <= vbx.smallEnd(d)) {
+	    if (bx.smallEnd(d) == vbx.smallEnd(d)) {
 		bx.growLo(d, ng);
 	    }
 	    if (bx.bigEnd(d) >= vbx.bigEnd(d)) {
