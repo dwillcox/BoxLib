@@ -127,7 +127,11 @@ void
 BoxArray::set (int        i,
                const Box& ibox)
 {
-    m_typ = ibox.ixType();
+    if (i==0) {
+	m_typ = ibox.ixType();
+    } else {
+	BL_ASSERT(m_typ == ibox.ixType());
+    }
     if (!m_ref.unique())
 	uniqify();
     m_ref->m_abox.set(i, BoxLib::enclosedCells(ibox));
@@ -514,8 +518,6 @@ BoxArray::convert (Box (*fp)(const Box&))
 
     if (!m_ref.unique())
         uniqify();
-
-    m_typ = fp(get(0)).ixType();
 
     const int N = size();
     for (int i = 0; i < N; ++i)
