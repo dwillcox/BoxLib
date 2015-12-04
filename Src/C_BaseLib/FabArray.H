@@ -548,7 +548,7 @@ public:
     //
     // Returns the tile Box at the current index.
     //
-    const Box& tilebox () const { return pta->tileArray[currentIndex]; }
+    Box tilebox () const;
     //
     // Returns the dir-nodal (or all nodal if dir<0) Box at the current index.
     //
@@ -561,10 +561,6 @@ public:
     //  Returns the dir-nodal (or all nodal if dir<0) box grown to include ghost cells.
     //
     Box grownnodaltilebox (int dir=-1, int ng=-1) const;
-    //
-    // Nodalize a tile box
-    //
-    void nodalize (Box& bx, int dir) const;
     //
     // Returns the valid Box that current tile resides.
     //
@@ -603,6 +599,7 @@ private:
     int           currentIndex;
     int           beginIndex;
     int           endIndex;
+    IndexType     typ; 
 
     void Initialize ();
 };
