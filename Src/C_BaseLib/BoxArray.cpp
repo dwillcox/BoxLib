@@ -461,13 +461,11 @@ BoxArray::contains (const Box& b) const
 bool
 BoxArray::contains (const BoxArray& bl) const
 {
-    const int N = size();
- 
-    if (N == 0) return false;
+    if (size() == 0) return false;
 
     if (!minimalBox().contains(bl.minimalBox())) return false;
 
-    for (int i = 0; i < N; ++i)
+    for (int i = 0, N = bl.size(); i < N; ++i)
         if (!contains(bl[i]))
             return false;
 
