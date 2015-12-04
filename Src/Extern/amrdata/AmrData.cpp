@@ -1413,7 +1413,7 @@ void AmrData::FillVar(Array<FArrayBox *> &destFabs, const Array<Box> &destBoxes,
       }
     }
 
-    IndexType boxType(destBoxes.ixType());
+    IndexType boxType(destBoxes[0].ixType());
     BoxList unfilledBoxesOnThisLevel(boxType);
     BoxList unfillableBoxesOnThisLevel(boxType);
     // Do this for all local fab boxes.
