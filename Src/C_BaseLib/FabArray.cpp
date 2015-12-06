@@ -320,7 +320,6 @@ FabArrayBase::TheCPC (const CPC&          cpc,
         TheCPC.m_srcba.intersections(BoxLib::grow(TheCPC.m_dstba[i],
 						  TheCPC.m_dstng),
 				     isects,
-				     false,
 				     TheCPC.m_srcng);
 
         const int dst_owner = TheCPC.m_dstdm[i];

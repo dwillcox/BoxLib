@@ -292,15 +292,29 @@ public:
     Box minimalBox () const;
     //
     // Returns intersections of Box and BoxArray(+ghsotcells).
+    // ng = 0 if unspecified.
+    // first_only = false, if unspecified.  
     //
+    std::vector< std::pair<int,Box> > intersections (const Box& bx) const; 
     std::vector< std::pair<int,Box> > intersections (const Box& bx, 
-						     bool first_only=false,
-						     int ng = 0) const;
+						     bool first_only) const;
+    std::vector< std::pair<int,Box> > intersections (const Box& bx, 
+						     int ng) const;
+    //
+    void intersections (const Box& bx, 
+			std::vector< std::pair<int,Box> >& isects) const;
+    void intersections (const Box& bx, 
+			std::vector< std::pair<int,Box> >& isects,
+			bool first_only) const;
+    void intersections (const Box& bx, 
+			std::vector< std::pair<int,Box> >& isects, 
+			int ng) const;
 
     void intersections (const Box& bx, 
 			std::vector< std::pair<int,Box> >& isects, 
-			bool first_only=false,
-			int ng = 0) const;
+			bool first_only,
+			int ng) const;
+
     //
     // Clear out the internal hash table used by intersections.
     //

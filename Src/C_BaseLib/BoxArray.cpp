@@ -430,15 +430,10 @@ BoxArray::contains (const IntVect& iv) const
 {
     if (size() > 0)
     {
-        std::vector< std::pair<int,Box> > isects;
-        intersections(Box(iv,iv,ixType()),isects, true);
-	if (isects.empty()) {
-	    return false;
-	} else {
-	    return true;
-	}
+	return intersects(Box(iv,iv,ixType()));
+    } else {
+	return false;
     }
-    return false;
 }
 
 bool
@@ -804,20 +799,50 @@ BoxLib::GetBndryCells (const BoxArray& ba,
 }
 
 std::vector< std::pair<int,Box> >
-BoxArray::intersections (const Box& bx, bool first_only, int ng) const
+BoxArray::intersections (const Box& bx) const
 {
     std::vector< std::pair<int,Box> > isects;
-    intersections(bx,isects,first_only,ng);
+    intersections(bx,isects,false,0);
+    return isects;
+}
+
+std::vector< std::pair<int,Box> >
+BoxArray::intersections (const Box& bx, bool first_only) const
+{
+    std::vector< std::pair<int,Box> > isects;
+    intersections(bx,isects,first_only,0);
+    return isects;
+}
+
+std::vector< std::pair<int,Box> >
+BoxArray::intersections (const Box& bx, int ng) const
+{
+    std::vector< std::pair<int,Box> > isects;
+    intersections(bx,isects,false,ng);
     return isects;
 }
 
 void
-BoxArray::clear_hash_bin () const
+BoxArray::intersections (const Box&                         bx,
+                         std::vector< std::pair<int,Box> >& isects) const
 {
-    if (!m_ref->hash.empty())
-    {
-        m_ref->hash.clear();
-    }
+    intersections(bx, isects, false, 0);
+}
+
+void
+BoxArray::intersections (const Box&                         bx,
+                         std::vector< std::pair<int,Box> >& isects,
+			 bool                               first_only) const
+{
+    intersections(bx, isects, first_only, 0);
+}
+
+void
+BoxArray::intersections (const Box&                         bx,
+                         std::vector< std::pair<int,Box> >& isects,
+			 int                                ng) const
+{
+    intersections(bx, isects, false, ng);
 }
 
 void
@@ -900,6 +925,15 @@ BoxArray::intersections (const Box&                         bx,
                 }
             }
         }
+    }
+}
+
+void
+BoxArray::clear_hash_bin () const
+{
+    if (!m_ref->hash.empty())
+    {
+        m_ref->hash.clear();
     }
 }
 
