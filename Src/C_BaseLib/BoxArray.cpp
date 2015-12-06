@@ -702,7 +702,7 @@ BoxLib::intersect (const BoxArray& ba,
 {
     std::vector< std::pair<int,Box> > isects;
 
-    ba.intersections(b,isects,ng);
+    ba.intersections(b,isects,false,ng);
 
     BoxArray r(isects.size());
 
