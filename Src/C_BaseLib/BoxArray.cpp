@@ -415,12 +415,12 @@ BoxArray::grow (int dir,
 }
 
 bool
-BoxArray::intersects (const Box& b) const
+BoxArray::intersects (const Box& b, int ng) const
 {
     std::vector< std::pair<int,Box> > isects;
 
     bool first_only = true;
-    intersections(b,isects,first_only);
+    intersections(b,isects,first_only,ng);
 
     return (isects.size() > 0) ;
 }
@@ -697,11 +697,12 @@ BoxLib::complementIn (const Box&      b,
 
 BoxArray
 BoxLib::intersect (const BoxArray& ba,
-		   const Box&      b)
+		   const Box&      b,
+		   int             ng)
 {
     std::vector< std::pair<int,Box> > isects;
 
-    ba.intersections(b,isects);
+    ba.intersections(b,isects,ng);
 
     BoxArray r(isects.size());
 
@@ -803,10 +804,10 @@ BoxLib::GetBndryCells (const BoxArray& ba,
 }
 
 std::vector< std::pair<int,Box> >
-BoxArray::intersections (const Box& bx, bool first_only) const
+BoxArray::intersections (const Box& bx, bool first_only, int ng) const
 {
     std::vector< std::pair<int,Box> > isects;
-    intersections(bx,isects,first_only);
+    intersections(bx,isects,first_only,ng);
     return isects;
 }
 
@@ -822,7 +823,8 @@ BoxArray::clear_hash_bin () const
 void
 BoxArray::intersections (const Box&                         bx,
                          std::vector< std::pair<int,Box> >& isects,
-			 bool first_only) const
+			 bool                               first_only,
+			 int                                ng) const
 {
     // called too many times  BL_PROFILE("BoxArray::intersections()");
 
@@ -869,7 +871,7 @@ BoxArray::intersections (const Box&                         bx,
     {
         BL_ASSERT(bx.ixType() == m_typ);
 
-        Box           cbx = BoxLib::coarsen(bx, m_ref->crsn);
+        Box           cbx = BoxLib::coarsen(BoxLib::grow(bx,ng), m_ref->crsn);
         const IntVect& sm = BoxLib::max(cbx.smallEnd()-1, m_ref->bbox.smallEnd());
         const IntVect& bg = BoxLib::min(cbx.bigEnd(),     m_ref->bbox.bigEnd());
 
@@ -888,7 +890,7 @@ BoxArray::intersections (const Box&                         bx,
                      ++v_it)
                 {
                     const int  index = *v_it;
-                    const Box& isect = bx & get(index);
+                    const Box& isect = bx & BoxLib::grow(get(index),ng);
 
                     if (isect.ok())
                     {
