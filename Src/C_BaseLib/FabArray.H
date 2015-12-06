@@ -404,15 +404,6 @@ public:
     static int NFabArrays() { return nFabArrays; }
     int FabArrayID() const  { return faID; }
 
-    // DO NOT CALL THESE IF YOU DO NOT KNOW WHAT YOU ARE DOING!!!
-    //
-    // Given a normal FabArray (i.e., with non-overlapping boxarray),
-    // this sets n_grow and turns it into a special FabArray with overlapping boxarray.
-    // This is useful for parallel copy, which only copies form valid to valid regions.
-    void SetNGrow (int n_grow_new) const;
-    // This reset it back to normal.  These two should always appear in pair.
-    void ResetNGrow () const;
-
     struct TileArray
     {
 	int nuse;
@@ -437,9 +428,6 @@ protected:
     mutable int         n_grow;
     int                 n_comp;
     int                 faID;
-
-    mutable BoxArray    boxarray_orig;
-    mutable int         n_grow_orig;
 
     // Key for unique combination of BoxArray and DistributionMapping
     // Note both BoxArray and DistributionMapping are reference counted.
