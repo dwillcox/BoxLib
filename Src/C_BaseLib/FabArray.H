@@ -277,7 +277,9 @@ public:
         CPC (const BoxArray&            dstba,
              const BoxArray&            srcba,
              const DistributionMapping& dstdm,
-             const DistributionMapping& srcdm);
+             const DistributionMapping& srcdm,
+	     int                        dstng,
+	     int                        srcng);
 
         ~CPC ();
 
@@ -292,6 +294,8 @@ public:
         BoxArray            m_srcba;
         DistributionMapping m_dstdm;
         DistributionMapping m_srcdm;
+	int                 m_dstng;
+	int                 m_srcng;
         int                 m_nuse;
 	bool                m_threadsafe_loc;
 	bool                m_threadsafe_rcv;
@@ -1638,9 +1642,6 @@ FabArray<FAB>::copy (const FabArray<FAB>& src,
     BL_ASSERT(src.nGrow() >= snghost);
     BL_ASSERT(    nGrow() >= dnghost);
 
-    if (snghost > 0) src.SetNGrow(src.nGrow()-snghost);
-    if (dnghost > 0)     SetNGrow(    nGrow()-dnghost);
-
     if ((src.boxArray()[0].cellCentered() || op == FabArrayBase::COPY) &&
         (boxarray == src.boxarray && distributionMap == src.distributionMap))
     {
@@ -1654,7 +1655,7 @@ FabArray<FAB>::copy (const FabArray<FAB>& src,
 #endif
         for (MFIter fai(*this,true); fai.isValid(); ++fai)
         {
-            const Box& bx = fai.tilebox();
+            const Box& bx = fai.growntilebox(dnghost);
 
             if (op == FabArrayBase::COPY)
             {
@@ -1666,12 +1667,10 @@ FabArray<FAB>::copy (const FabArray<FAB>& src,
             }
         }
 
-	if (snghost > 0) src.ResetNGrow();
-	if (dnghost > 0)     ResetNGrow();
         return;
     }
 
-    const CPC cpc(boxarray, src.boxarray, distributionMap, src.distributionMap);
+    const CPC cpc(boxarray, src.boxarray, distributionMap, src.distributionMap, dnghost, snghost);
 
     FabArrayBase::CPCCacheIter cache_it = FabArrayBase::TheCPC(cpc, *this, src);
 
@@ -1702,8 +1701,6 @@ FabArray<FAB>::copy (const FabArray<FAB>& src,
             }
         }
 
-	if (snghost > 0) src.ResetNGrow();
-	if (dnghost > 0)     ResetNGrow();
         return;
     }
 
@@ -1718,8 +1715,6 @@ FabArray<FAB>::copy (const FabArray<FAB>& src,
         //
         // No work to do.
         //
-	if (snghost > 0) src.ResetNGrow();
-	if (dnghost > 0)     ResetNGrow();
         return;
     }
     //
@@ -1910,8 +1905,6 @@ FabArray<FAB>::copy (const FabArray<FAB>& src,
         NCompLeft -= NC;
     }
 
-    if (snghost > 0) src.ResetNGrow();
-    if (dnghost > 0)     ResetNGrow();
     return;
 
 #endif /*BL_USE_MPI*/
