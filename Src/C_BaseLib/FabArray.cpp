@@ -547,6 +547,7 @@ FabArrayBase::getTileArray (const IntVect& tilesize) const
 	p = &FabArrayBase::m_TheTileArrayCache[m_bdkey][tilesize];
 	if (p->nuse == -1) {
 	    buildTileArray(tilesize, *p);
+	    p->nuse = 0;
 	    m_TAC_stats.recordBuild();
 	}
 #ifdef _OPENMP
@@ -564,8 +565,6 @@ FabArrayBase::getTileArray (const IntVect& tilesize) const
 void
 FabArrayBase::buildTileArray (const IntVect& tileSize, TileArray& ta) const
 {
-    ta.nuse = 0;
-
     // Note that we store Tiles always as cell-centered boxes, even if the boxarray is nodal.
 
     for (int i = 0; i < indexMap.size(); ++i)
@@ -669,6 +668,7 @@ FabArrayBase::getFB (bool cross) const
     FB& fb = FabArrayBase::m_TheFBCache[m_bdkey][key];
     if (fb.nuse == -1) {
 	buildFB(cross, fb);
+	fb.nuse = 0;
 	m_FBC_stats.recordBuild();
     }
     ++(fb.nuse);
@@ -680,8 +680,6 @@ void
 FabArrayBase::buildFB (bool cross, FB& fb) const
 {
     BL_PROFILE("FabArray::buildFB");
-
-    fb.nuse = 0;
 
     const BoxArray&            ba = boxArray();
     const DistributionMapping& dm = DistributionMap();
