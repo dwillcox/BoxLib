@@ -2226,14 +2226,7 @@ Amr::regrid (int  lbase,
         amr_level.clear(lev);
 
     finest_level = new_finest;
-    //
-    // Flush the caches.
-    // We're most interesting in flushing cached stuff from the finer levels.
-    // Lower level stuff that could be reused is just as easily rebuilt.
-    //
-    FabArrayBase::flushFBCache();
-    Geometry::FlushPIRMCache();
-    FabArrayBase::CPC::FlushCache();
+
     DistributionMapping::FlushCache();
 
     //
@@ -2305,7 +2298,6 @@ Amr::regrid (int  lbase,
         for(int iMap(0); iMap < mLDM.size(); ++iMap) {
           MultiFab::MoveAllFabs(mLDM[iMap]);
         }
-      Geometry::FlushPIRMCache();
     }
 
 #ifdef USE_STATIONDATA

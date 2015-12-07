@@ -6,6 +6,8 @@
 
 #include <FabArray.H>
 #include <ParmParse.H>
+#include <Geometry.H>
+
 //
 // Set default values in Initialize()!!!
 //
@@ -26,10 +28,12 @@ int FabArrayBase::nFabArrays(0);
 
 FabArrayBase::TACache              FabArrayBase::m_TheTileArrayCache;
 FabArrayBase::FBCache              FabArrayBase::m_TheFBCache;
+FabArrayBase::FPBCache             FabArrayBase::m_TheFPBCache;
 FabArrayBase::CPCCache             FabArrayBase::m_TheCopyCache;
 
 FabArrayBase::CacheStats           FabArrayBase::m_TAC_stats("Tile Array Cache");
 FabArrayBase::CacheStats           FabArrayBase::m_FBC_stats("Fill Boundary Cache");
+FabArrayBase::CacheStats           FabArrayBase::m_FPBC_stats("Fill Periodic Boundary Cache");
 FabArrayBase::CacheStats           FabArrayBase::m_CPC_stats("Copy Cache");
 
 std::map<FabArrayBase::BDKey, int> FabArrayBase::m_BD_count;
@@ -437,11 +441,13 @@ FabArrayBase::Finalize ()
 
     FabArrayBase::flushTileArrayCache();
     FabArrayBase::flushFBCache();
+    FabArrayBase::flushFPBCache();
 
     if (ParallelDescriptor::IOProcessor()) {
 	m_FA_stats.print();
 	m_TAC_stats.print();
 	m_FBC_stats.print();
+	m_FPBC_stats.print();
 	m_CPC_stats.print();
     }
 
@@ -841,6 +847,183 @@ FabArrayBase::flushFBCache ()
     m_TheFBCache.clear();
 }
 
+const FabArrayBase::FPB&
+FabArrayBase::getFPB (bool corners, const Geometry& geom) const
+{
+    BL_ASSERT(getBDKey() == m_bdkey);
+    int key = FPB::key(n_grow, boxarray.ixType().ixType(), corners);
+    FPB& fpb = FabArrayBase::m_TheFPBCache[m_bdkey][key];
+    if (fpb.nuse == -1) {
+	buildFPB(corners, geom, fpb);
+	fpb.nuse = 0;
+	m_FPBC_stats.recordBuild();
+    }
+    ++(fpb.nuse);
+    m_FPBC_stats.recordUse();
+    return fpb;
+}
+
+void
+FabArrayBase::buildFPB(bool corners, const Geometry& geom, FPB& fpb) const
+{
+    BL_PROFILE("FabArray::buildFPB");
+
+    const BoxArray&            ba = boxArray();
+    const DistributionMapping& dm = DistributionMap();
+
+    fpb.m_LocTags = new FPBComTagsContainer;
+    fpb.m_SndTags = new MapOfFPBComTagContainers;
+    fpb.m_RcvTags = new MapOfFPBComTagContainers;
+    fpb.m_SndVols = new std::map<int,int>;
+    fpb.m_RcvVols = new std::map<int,int>;
+
+    if (IndexMap().empty())
+        //
+        // We don't own any of the relevant FABs so can't possibly have any work to do.
+        //
+        return;
+
+    const int MyProc = ParallelDescriptor::MyProc();
+
+    Box TheDomain = geom.Domain();
+    TheDomain.convert(ba.ixType());
+
+    Array<IntVect> pshifts(27);
+
+    for (int i = 0, N = ba.size(); i < N; i++)
+    {
+        const Box& dst      = BoxLib::grow(ba[i],n_grow);
+        const int dst_owner = dm[i];
+
+        if (TheDomain.contains(dst)) continue;
+
+        for (int j = 0, N = ba.size(); j < N; j++)
+        {
+            const int src_owner = dm[j];
+
+            if (dst_owner != MyProc && src_owner != MyProc) continue;
+
+            Box src = ba[j] & TheDomain;
+
+            if (TheDomain.contains(BoxLib::grow(src,n_grow))) continue;
+
+            if (corners)
+            {
+                for (int i = 0; i < BL_SPACEDIM; i++)
+                {
+                    if (!geom.isPeriodic(i))
+                    {
+                        src.growLo(i,n_grow);
+                        src.growHi(i,n_grow);
+                    }
+                }
+            }
+
+            geom.periodicShift(dst, src, pshifts);
+
+            for (Array<IntVect>::const_iterator it = pshifts.begin(), End = pshifts.end();
+                 it != End;
+                 ++it)
+            {
+                const IntVect& iv   = *it;
+                const Box&     shft = src + iv;
+
+                Box dbox_tmp = dst & shft;
+
+		const BoxList tilelist(dbox_tmp, FabArrayBase::comm_tile_size);
+
+		for (BoxList::const_iterator it = tilelist.begin(), End = tilelist.end(); it != End; ++it)
+                {
+                    FPBComTag tag;
+                    tag.dbox     = *it;
+                    tag.sbox     = tag.dbox - iv;
+                    tag.dstIndex = i;
+                    tag.srcIndex = j;
+
+                    if (dst_owner == MyProc)
+                    {
+                        if (src_owner == MyProc)
+                        {
+                            fpb.m_LocTags->push_back(tag);
+                        }
+                        else
+                        {
+                            FabArrayBase::SetRecvTag(*fpb.m_RcvTags,src_owner,tag,*fpb.m_RcvVols,tag.dbox);
+                        }
+                    }
+                    else if (src_owner == MyProc)
+                    {
+                        FabArrayBase::SetSendTag(*fpb.m_SndTags,dst_owner,tag,*fpb.m_SndVols,tag.dbox);
+                    }
+                }
+            }
+        }
+    }
+    //
+    // Squeeze out any unused memory ...
+    //
+    FPBComTagsContainer tmp(*fpb.m_LocTags); 
+
+    fpb.m_LocTags->swap(tmp);
+
+    for (MapOfFPBComTagContainers::iterator it = fpb.m_SndTags->begin(), End = fpb.m_SndTags->end(); it != End; ++it)
+    {
+        FPBComTagsContainer tmp(it->second);
+
+        it->second.swap(tmp);
+    }
+
+    for (MapOfFPBComTagContainers::iterator it = fpb.m_RcvTags->begin(), End = fpb.m_RcvTags->end(); it != End; ++it)
+    {
+        FPBComTagsContainer tmp(it->second);
+
+        it->second.swap(tmp);
+    }
+
+    //
+    // set thread safety
+    //
+    if ( ba[0].cellCentered() ) {
+	fpb.m_threadsafe_loc = true;
+	fpb.m_threadsafe_rcv = true;
+    } else {
+	fpb.m_threadsafe_loc = false;
+	fpb.m_threadsafe_rcv = false;
+    }
+}
+
+void
+FabArrayBase::flushFPB () const
+{
+    BL_ASSERT(getBDKey() == m_bdkey);
+
+    FPBCache& fpbo = m_TheFPBCache;
+    FPBCache::iterator fpbo_it = fpbo.find(m_bdkey);
+    if(fpbo_it != fpbo.end()) 
+    {
+	for (FPBMap::const_iterator fpbi_it = fpbo_it->second.begin();
+	     fpbi_it != fpbo_it->second.end(); ++fpbi_it)
+	{
+	    m_FPBC_stats.recordErase(fpbi_it->second.nuse);
+	}
+	fpbo.erase(fpbo_it);
+    }
+}
+
+void
+FabArrayBase::flushFPBCache ()
+{
+    for (FPBCache::const_iterator fpbo_it = m_TheFPBCache.begin();
+       fpbo_it != m_TheFPBCache.end(); ++fpbo_it)
+    {
+	for (FPBMap::const_iterator fpbi_it = fpbo_it->second.begin();
+	     fpbi_it != fpbo_it->second.end(); ++fpbi_it)
+	{
+	    m_FPBC_stats.recordErase(fpbi_it->second.nuse);
+	}
+    }
+    m_TheFPBCache.clear();
+}
 
 MFIter::MFIter (const FabArrayBase& fabarray_, 
 		unsigned char       flags_)

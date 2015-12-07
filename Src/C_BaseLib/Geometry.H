@@ -200,83 +200,6 @@ public:
                               int             scomp,
                               int             ncomp) const;
     //
-    // Flush the cache of PIRM information.
-    //
-    static void FlushPIRMCache ();
-    //
-    // The size of the PIRM cache.
-    //
-    static int PIRMCacheSize ();
-    //
-    // Used by FillPeriodicBoundary().
-    //
-    struct FPBComTag
-    {
-        Box sbox;
-        Box dbox;
-        int srcIndex;
-        int dstIndex;
-    };
-    //
-    // Used in caching FillPeriodicBoundary().
-    //
-    struct FPB
-    {
-        FPB ();
-
-        FPB (const BoxArray&            ba,
-             const DistributionMapping& dm,
-             const Box&                 domain,
-             int                        ngrow,
-             bool                       do_corners);
-
-        ~FPB ();
-
-        bool operator== (const FPB& rhs) const;
-        bool operator!= (const FPB& rhs) const { return !operator==(rhs); }
-
-        int bytes () const;
-
-        BoxArray            m_ba;
-        DistributionMapping m_dm;
-        Box                 m_domain;
-        int                 m_ngrow;
-        bool                m_do_corners;
-        bool                m_reused;
-	bool                m_threadsafe_loc;
-	bool                m_threadsafe_rcv;
-        //
-        // Some useful typedefs.
-        //
-        typedef std::vector<FPBComTag> FPBComTagsContainer;
-
-        typedef std::map<int,FPBComTagsContainer> MapOfFPBComTagContainers;
-        //
-        // The cache of local and send/recv info per FabArray::copy().
-        //
-        FPBComTagsContainer*      m_LocTags;
-        MapOfFPBComTagContainers* m_SndTags;
-        MapOfFPBComTagContainers* m_RcvTags;
-        std::map<int,int>*        m_SndVols;
-        std::map<int,int>*        m_RcvVols;
-    };
-    //
-    // Some useful typedefs for the FPB cache.
-    //
-    typedef std::multimap<int,Geometry::FPB> FPBMMap;
-
-    typedef FPBMMap::iterator FPBMMapIter;
-
-    static FPBMMap m_FPBCache;
-
-    static int fpb_cache_max_size;
-    //
-    // See if we've got an approprite FPB cached.
-    //
-    static Geometry::FPBMMapIter GetFPB (const Geometry&      geom,
-                                         const Geometry::FPB& fpb,
-                                         const FabArrayBase&  mf);
-    //
     // Send Geometry to sidecar procs.
     //
 #ifdef BL_USE_MPI
@@ -331,13 +254,8 @@ namespace BoxLib
             if (geom.isPeriodic(n))
                 BL_ASSERT(mf.nGrow() <= geom.Domain().length(n));
 #endif
-        const Geometry::FPB fpb(mf.boxArray(),mf.DistributionMap(),geom.Domain(),mf.nGrow(),corners);
 
-        Geometry::FPBMMapIter cache_it = Geometry::GetFPB(geom,fpb,mf);
-
-        BL_ASSERT(cache_it != Geometry::m_FPBCache.end());
-
-        const Geometry::FPB& TheFPB = cache_it->second;
+        const FabArrayBase::FPB& TheFPB = mf.getFPB(corners,geom);
 
         if (ParallelDescriptor::NProcs() == 1)
         {
@@ -350,7 +268,7 @@ namespace BoxLib
 #endif
 	    for (int i=0; i<N_loc; ++i)
 	    {
-                const Geometry::FPBComTag& tag = (*TheFPB.m_LocTags)[i];
+                const FabArrayBase::FPBComTag& tag = (*TheFPB.m_LocTags)[i];
                 mf[tag.dstIndex].copy(mf[tag.srcIndex],tag.sbox,scomp,tag.dbox,scomp,ncomp);
             }
 
@@ -371,6 +289,7 @@ namespace BoxLib
             return;
 
         typedef typename FAB::value_type value_type;
+	
 
         Array<MPI_Status>  stats;
         Array<int>         recv_from;
@@ -391,14 +310,14 @@ namespace BoxLib
 	Array<value_type*>                     send_data;
 	Array<int>                             send_N;
 	Array<int>                             send_rank;
-	Array<const Geometry::FPB::FPBComTagsContainer*> send_fctc;
+	Array<const FabArrayBase::FPBComTagsContainer*> send_fctc;
 
 	send_data.reserve(N_snds);
 	send_N   .reserve(N_snds);
 	send_rank.reserve(N_snds);
 	send_fctc.reserve(N_snds);
 
-        for (Geometry::FPB::MapOfFPBComTagContainers::const_iterator m_it = TheFPB.m_SndTags->begin(),
+        for (FabArrayBase::MapOfFPBComTagContainers::const_iterator m_it = TheFPB.m_SndTags->begin(),
                  m_End = TheFPB.m_SndTags->end();
              m_it != m_End;
              ++m_it)
@@ -427,9 +346,9 @@ namespace BoxLib
 	    value_type* dptr = send_data[i];
 	    BL_ASSERT(dptr != 0);
 
-	    const Geometry::FPB::FPBComTagsContainer& fctc = *send_fctc[i];
+	    const FabArrayBase::FPBComTagsContainer& fctc = *send_fctc[i];
 
-            for (Geometry::FPB::FPBComTagsContainer::const_iterator it = fctc.begin();
+            for (FabArrayBase::FPBComTagsContainer::const_iterator it = fctc.begin();
                  it != fctc.end(); ++it)
             {
                 const Box& bx = it->sbox;
@@ -464,7 +383,7 @@ namespace BoxLib
 #endif
 	for (int i=0; i<N_loc; ++i)
 	{
-            const Geometry::FPBComTag& tag = (*TheFPB.m_LocTags)[i];
+            const FabArrayBase::FPBComTag& tag = (*TheFPB.m_LocTags)[i];
 
             BL_ASSERT(mf.DistributionMap()[tag.dstIndex] == ParallelDescriptor::MyProc());
             BL_ASSERT(mf.DistributionMap()[tag.srcIndex] == ParallelDescriptor::MyProc());
@@ -479,12 +398,12 @@ namespace BoxLib
 
 	if (N_rcvs > 0)
 	{
-	    Array<const Geometry::FPB::FPBComTagsContainer*> recv_fctc;
+	    Array<const FabArrayBase::FPBComTagsContainer*> recv_fctc;
 	    recv_fctc.reserve(N_rcvs);
 
 	    for (int k = 0; k < N_rcvs; k++)
 	    {
-		Geometry::FPB::MapOfFPBComTagContainers::const_iterator m_it = TheFPB.m_RcvTags->find(recv_from[k]);
+		FabArrayBase::MapOfFPBComTagContainers::const_iterator m_it = TheFPB.m_RcvTags->find(recv_from[k]);
                 BL_ASSERT(m_it != TheFPB.m_RcvTags->end());
 		
 		recv_fctc.push_back(&(m_it->second));
@@ -501,9 +420,9 @@ namespace BoxLib
 		value_type*  dptr = recv_data[k];
 		BL_ASSERT(dptr != 0);
 		
-		const Geometry::FPB::FPBComTagsContainer& fctc = *recv_fctc[k];
+		const FabArrayBase::FPBComTagsContainer& fctc = *recv_fctc[k];
 
-                for (Geometry::FPB::FPBComTagsContainer::const_iterator it = fctc.begin();
+                for (FabArrayBase::FPBComTagsContainer::const_iterator it = fctc.begin();
                      it != fctc.end(); ++it)
                 {
                     const Box& bx  = it->dbox;

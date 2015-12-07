@@ -10,10 +10,6 @@
 #include <FArrayBox.H>
 #include <BLProfiler.H>
 
-#ifdef BL_LAZY
-#include <Lazy.H>
-#endif
-
 //
 // The definition of some static data members.
 //
@@ -25,10 +21,6 @@ namespace
 {
     bool verbose;
 }
-
-const int fpb_cache_max_size_def = 25;
-
-int Geometry::fpb_cache_max_size = fpb_cache_max_size_def;
 
 std::ostream&
 operator<< (std::ostream&   os,
@@ -51,116 +43,6 @@ operator>> (std::istream& is,
     Geometry::ProbDomain(rb);
 
     return is;
-}
-
-Geometry::FPB::FPB ()
-    :
-    m_ngrow(-1),
-    m_do_corners(false),
-    m_reused(false),
-    m_threadsafe_loc(false),
-    m_threadsafe_rcv(false),
-    m_LocTags(0),
-    m_SndTags(0),
-    m_RcvTags(0),
-    m_SndVols(0),
-    m_RcvVols(0) {}
-
-Geometry::FPB::FPB (const BoxArray&            ba,
-                    const DistributionMapping& dm,
-                    const Box&                 domain,
-                    int                        ngrow,
-                    bool                       do_corners)
-    :
-    m_ba(ba),
-    m_dm(dm),
-    m_domain(domain),
-    m_ngrow(ngrow),
-    m_do_corners(do_corners),
-    m_reused(false),
-    m_threadsafe_loc(false),
-    m_threadsafe_rcv(false),
-    m_LocTags(0),
-    m_SndTags(0),
-    m_RcvTags(0),
-    m_SndVols(0),
-    m_RcvVols(0)
-{
-    BL_ASSERT(ngrow >= 0);
-    BL_ASSERT(domain.ok());
-}
-
-Geometry::FPB::~FPB ()
-{
-    delete m_LocTags;
-    delete m_SndTags;
-    delete m_RcvTags;
-    delete m_SndVols;
-    delete m_RcvVols;
-}
-
-bool
-Geometry::FPB::operator== (const FPB& rhs) const
-{
-#if 0
-    return
-        m_ngrow == rhs.m_ngrow && m_do_corners == rhs.m_do_corners && m_domain == rhs.m_domain && m_ba == rhs.m_ba && m_dm == rhs.m_dm;
-#else
-    return false;
-#endif
-}
-
-int
-Geometry::FPB::bytes () const
-{
-    int cnt = sizeof(Geometry::FPB);
-
-    if (m_LocTags)
-    {
-        cnt += sizeof(FPBComTagsContainer) + m_LocTags->size()*sizeof(FPBComTag);
-    }
-
-    if (m_SndTags)
-    {
-        cnt += sizeof(MapOfFPBComTagContainers);
-
-        cnt += m_SndTags->size()*sizeof(MapOfFPBComTagContainers::value_type);
-
-        for (FPB::MapOfFPBComTagContainers::const_iterator it = m_SndTags->begin(),
-                 m_End = m_SndTags->end();
-             it != m_End;
-             ++it)
-        {
-            cnt += it->second.size()*sizeof(FPBComTag);
-        }
-    }
-
-    if (m_RcvTags)
-    {
-        cnt += sizeof(MapOfFPBComTagContainers);
-
-        cnt += m_SndTags->size()*sizeof(MapOfFPBComTagContainers::value_type);
-
-        for (FPB::MapOfFPBComTagContainers::const_iterator it = m_RcvTags->begin(),
-                 m_End = m_RcvTags->end();
-             it != m_End;
-             ++it)
-        {
-            cnt += it->second.size()*sizeof(FPBComTag);
-        }
-    }
-
-    if (m_SndVols)
-    {
-        cnt += sizeof(std::map<int,int>) + m_SndVols->size()*sizeof(std::map<int,int>::value_type);
-    }
-
-    if (m_RcvVols)
-    {
-        cnt += sizeof(std::map<int,int>) + m_RcvVols->size()*sizeof(std::map<int,int>::value_type);
-    }
-
-    return cnt;
 }
 
 void
@@ -604,8 +486,6 @@ void
 Geometry::Finalize ()
 {
     c_sys = undef;
-
-    Geometry::FlushPIRMCache();
 }
 
 void
@@ -656,18 +536,12 @@ Geometry::Setup (const RealBox* rb, int coord, int* isper)
     //
     verbose                        = true;
     Geometry::spherical_origin_fix = 0;
-    Geometry::fpb_cache_max_size   = fpb_cache_max_size_def;
 
     D_EXPR(is_periodic[0]=0, is_periodic[1]=0, is_periodic[2]=0);
 
     pp.query("verbose",              verbose);
     pp.query("spherical_origin_fix", Geometry::spherical_origin_fix);
-    pp.query("fpb_cache_max_size",   Geometry::fpb_cache_max_size);
-    //
-    // Don't let the cache size get too small.  This simplifies some logic later.
-    //
-    if (Geometry::fpb_cache_max_size < 1)
-        Geometry::fpb_cache_max_size = 1;
+
     //
     // Now get periodicity info.
     //
@@ -845,247 +719,6 @@ Geometry::periodicShift (const Box&      target,
         if (ri != 0 && is_periodic[0])
             locsrc.shift(0,-ri*domain.length(0));
     }
-}
-
-//
-// The cache.
-//
-Geometry::FPBMMap Geometry::m_FPBCache;
-
-Geometry::FPBMMapIter
-Geometry::GetFPB (const Geometry&      geom,
-                  const Geometry::FPB& fpb,
-                  const FabArrayBase&  mf)
-{
-    BL_PROFILE("Geometry::GetFPB");
-
-    BL_ASSERT(fpb.m_ngrow > 0);
-    BL_ASSERT(fpb.m_ba.size() > 0);
-    BL_ASSERT(geom.isAnyPeriodic());
-
-    const BoxArray&            ba     = fpb.m_ba;
-    const DistributionMapping& dm     = fpb.m_dm;
-    const int                  MyProc = ParallelDescriptor::MyProc();
-    const IntVect&             Typ    = ba[0].type();
-    const int                  Scale  = D_TERM(Typ[0],+3*Typ[1],+5*Typ[2]) + 11;
-    const int                  Key    = ba.size() + ba[0].numPts() + Scale + fpb.m_ngrow;
-
-    std::pair<Geometry::FPBMMapIter,Geometry::FPBMMapIter> er_it = m_FPBCache.equal_range(Key);
-    
-    for (Geometry::FPBMMapIter it = er_it.first; it != er_it.second; ++it)
-    {
-        if (it->second == fpb)
-        {
-            it->second.m_reused = true;
-
-            return it;
-        }
-    }
-
-    if (m_FPBCache.size() >= Geometry::fpb_cache_max_size)
-    {
-        //
-        // Don't let the size of the cache get too big.
-        // Get rid of entries with the biggest largest key that haven't been reused.
-        // Otherwise just remove the entry with the largest key.
-        //
-        Geometry::FPBMMapIter End      = m_FPBCache.end();
-        Geometry::FPBMMapIter last_it  = End;
-        Geometry::FPBMMapIter erase_it = End;
-
-        for (Geometry::FPBMMapIter it = m_FPBCache.begin(); it != End; ++it)
-        {
-            last_it = it;
-
-            if (!it->second.m_reused)
-                erase_it = it;
-        }
-
-        if (erase_it != End)
-        {
-            m_FPBCache.erase(erase_it);
-        }
-        else if (last_it != End)
-        {
-            m_FPBCache.erase(last_it);
-        }
-    }
-    //
-    // Got to insert one & then build it.
-    //
-    Geometry::FPBMMapIter cache_it = m_FPBCache.insert(FPBMMap::value_type(Key,fpb));
-    FPB&                  TheFPB   = cache_it->second;
-    //
-    // Here's where we allocate memory for the cache innards.
-    // We do this so we don't have to build objects of these types
-    // each time we search the cache.  Otherwise we'd be constructing
-    // and destroying said objects quite frequently.
-    //
-    TheFPB.m_LocTags = new FPB::FPBComTagsContainer;
-    TheFPB.m_SndTags = new FPB::MapOfFPBComTagContainers;
-    TheFPB.m_RcvTags = new FPB::MapOfFPBComTagContainers;
-    TheFPB.m_SndVols = new std::map<int,int>;
-    TheFPB.m_RcvVols = new std::map<int,int>;
-
-    if (mf.IndexMap().empty())
-        //
-        // We don't own any of the relevant FABs so can't possibly have any work to do.
-        //
-        return cache_it;
-
-    Box TheDomain = geom.Domain();
-    for (int n = 0; n < BL_SPACEDIM; n++)
-        if (ba.ixType()[n] == IndexType::NODE)
-            TheDomain.surroundingNodes(n);
-
-    Array<IntVect> pshifts(27);
-
-    for (int i = 0, N = ba.size(); i < N; i++)
-    {
-        const Box& dst      = BoxLib::grow(ba[i],fpb.m_ngrow);
-        const int dst_owner = dm[i];
-
-        if (TheDomain.contains(dst)) continue;
-
-        for (int j = 0, N = ba.size(); j < N; j++)
-        {
-            const int src_owner = dm[j];
-
-            if (dst_owner != MyProc && src_owner != MyProc) continue;
-
-            Box src = ba[j] & TheDomain;
-
-            if (TheDomain.contains(BoxLib::grow(src,fpb.m_ngrow))) continue;
-
-            if (fpb.m_do_corners)
-            {
-                for (int i = 0; i < BL_SPACEDIM; i++)
-                {
-                    if (!geom.isPeriodic(i))
-                    {
-                        src.growLo(i,fpb.m_ngrow);
-                        src.growHi(i,fpb.m_ngrow);
-                    }
-                }
-            }
-
-            geom.periodicShift(dst, src, pshifts);
-
-            for (Array<IntVect>::const_iterator it = pshifts.begin(), End = pshifts.end();
-                 it != End;
-                 ++it)
-            {
-                const IntVect& iv   = *it;
-                const Box&     shft = src + iv;
-
-                Box dbox_tmp = dst & shft;
-
-		const BoxList tilelist(dbox_tmp, FabArrayBase::comm_tile_size);
-
-		for (BoxList::const_iterator it = tilelist.begin(), End = tilelist.end(); it != End; ++it)
-                {
-                    FPBComTag tag;
-                    tag.dbox     = *it;
-                    tag.sbox     = tag.dbox - iv;
-                    tag.dstIndex = i;
-                    tag.srcIndex = j;
-
-                    if (dst_owner == MyProc)
-                    {
-                        if (src_owner == MyProc)
-                        {
-                            TheFPB.m_LocTags->push_back(tag);
-                        }
-                        else
-                        {
-                            FabArrayBase::SetRecvTag(*TheFPB.m_RcvTags,src_owner,tag,*TheFPB.m_RcvVols,tag.dbox);
-                        }
-                    }
-                    else if (src_owner == MyProc)
-                    {
-                        FabArrayBase::SetSendTag(*TheFPB.m_SndTags,dst_owner,tag,*TheFPB.m_SndVols,tag.dbox);
-                    }
-                }
-            }
-        }
-    }
-    //
-    // Squeeze out any unused memory ...
-    //
-    FPB::FPBComTagsContainer tmp(*TheFPB.m_LocTags); 
-
-    TheFPB.m_LocTags->swap(tmp);
-
-    for (FPB::MapOfFPBComTagContainers::iterator it = TheFPB.m_SndTags->begin(), End = TheFPB.m_SndTags->end(); it != End; ++it)
-    {
-        FPB::FPBComTagsContainer tmp(it->second);
-
-        it->second.swap(tmp);
-    }
-
-    for (FPB::MapOfFPBComTagContainers::iterator it = TheFPB.m_RcvTags->begin(), End = TheFPB.m_RcvTags->end(); it != End; ++it)
-    {
-        FPB::FPBComTagsContainer tmp(it->second);
-
-        it->second.swap(tmp);
-    }
-
-    //
-    // set thread safety
-    //
-    if ( ba[0].cellCentered() ) {
-	TheFPB.m_threadsafe_loc = true;
-	TheFPB.m_threadsafe_rcv = true;
-    } else {
-	TheFPB.m_threadsafe_loc = false;
-	TheFPB.m_threadsafe_rcv = false;
-    }
-
-    return cache_it;
-}
-
-void
-Geometry::FlushPIRMCache ()
-{
-    long stats[3] = {0,0,0}; // size, reused, bytes
-
-    stats[0] = m_FPBCache.size();
-
-    for (FPBMMapIter it = m_FPBCache.begin(), End = m_FPBCache.end(); it != End; ++it)
-    {
-        stats[2] += it->second.bytes();
-        if (it->second.m_reused)
-            stats[1]++;
-    }
-
-    if (verbose)
-    {
-#ifdef BL_LAZY
-	Lazy::QueueReduction( [=] () mutable {
-#endif
-        ParallelDescriptor::ReduceLongMax(&stats[0], 3, ParallelDescriptor::IOProcessorNumber());
-        if (stats[0] > 0 && ParallelDescriptor::IOProcessor())
-        {
-            std::cout << "Geometry::TheFPBCache: max size: "
-                      << stats[0]
-                      << ", max # reused: "
-                      << stats[1]
-                      << ", max bytes used: "
-                      << stats[2]
-                      << std::endl;
-        }
-#ifdef BL_LAZY
-	});
-#endif
-    }
-
-    m_FPBCache.clear();
-}
-
-int
-Geometry::PIRMCacheSize ()
-{
-    return m_FPBCache.size();
 }
 
 #ifdef BL_USE_MPI

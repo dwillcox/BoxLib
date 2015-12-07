@@ -29,6 +29,8 @@
 #include <ccse-mpi.H>
 #include <BLProfiler.H>
 
+class Geometry;
+
 //
 // Helper class
 //
@@ -181,13 +183,15 @@ public:
 	}
 	void recordUse () { ++nuse; }
 	void print () {
-	    std::cout << "### " << name << " ###\n";
-	    std::cout << "    tot # of builds  : " << nbuild  << "\n"
-		      << "    tot # of erasures: " << nerase  << "\n"
-		      << "    tot # of uses    : " << nuse    << "\n"
-		      << "    max cache size   : " << maxsize << "\n"
-		      << "    max # of uses    : " << maxuse
-		      << std::endl;
+	    if (nbuild > 0) {
+		std::cout << "### " << name << " ###\n";
+		std::cout << "    tot # of builds  : " << nbuild  << "\n"
+			  << "    tot # of erasures: " << nerase  << "\n"
+			  << "    tot # of uses    : " << nuse    << "\n"
+			  << "    max cache size   : " << maxsize << "\n"
+			  << "    max # of uses    : " << maxuse
+			  << std::endl;
+	    }
 	}
     };
     //
@@ -253,6 +257,68 @@ public:
     };
 
     const FB& getFB (bool cross) const;
+
+    //
+    // Used by FillPeriodicBoundary().
+    //
+    struct FPBComTag
+    {
+        Box sbox;
+        Box dbox;
+        int srcIndex;
+        int dstIndex;
+        //
+        // Some useful typedefs.
+        //
+        typedef std::vector<FPBComTag> FPBComTagsContainer;
+
+        typedef std::map<int,FPBComTagsContainer> MapOfFPBComTagContainers;
+    };
+    //
+    // Some useful typedefs.
+    //
+    typedef FPBComTag::FPBComTagsContainer FPBComTagsContainer;
+    typedef FPBComTag::MapOfFPBComTagContainers MapOfFPBComTagContainers;
+    
+    struct FPB
+    {
+        FPB () : nuse(-1),
+		 m_LocTags(0), 
+		 m_SndTags(0), 
+		 m_RcvTags(0), 
+		 m_SndVols(0), 
+		 m_RcvVols(0) { ; }
+        ~FPB ( ) {
+	    delete m_LocTags;
+	    delete m_SndTags;
+	    delete m_RcvTags;
+	    delete m_SndVols;
+	    delete m_RcvVols;
+	}
+
+	static int key (int ngrow, const IntVect& typ, bool do_corners) {
+	    return       10000*ngrow
+		+ D_TERM(1000*int(typ[0]),
+			 +100*int(typ[1]),
+			 +10*int(typ[2]))
+		+ int(do_corners);
+	}
+
+	int                 nuse;
+	//
+	bool                m_threadsafe_loc;
+	bool                m_threadsafe_rcv;
+        //
+        // The cache of local and send/recv info per FabArray::copy().
+        //
+        FPBComTagsContainer*      m_LocTags;
+        MapOfFPBComTagContainers* m_SndTags;
+        MapOfFPBComTagContainers* m_RcvTags;
+        std::map<int,int>*        m_SndVols;
+        std::map<int,int>*        m_RcvVols;
+    };
+
+    const FPB& getFPB (bool do_corners, const Geometry& geom) const;
 
     //
     // When copy()ing from one FabArray to another we can do a copy or an add.
@@ -402,6 +468,7 @@ public:
 
     static void flushTileArrayCache ();
     static void flushFBCache ();
+    static void flushFPBCache ();
 
 protected:
 
@@ -467,6 +534,19 @@ protected:
     void buildFB (bool cross, FB& fb) const;
     //
     void flushFB () const;
+
+    //
+    // FillPeriodicBoundary
+    //
+    typedef std::map<int  , FPB                 > FPBMap;
+    typedef std::map<BDKey, FPBMap, CompareBDKey> FPBCache;
+    //
+    static FPBCache    m_TheFPBCache;
+    static CacheStats  m_FPBC_stats;
+    //
+    void buildFPB (bool do_corners, const Geometry& geom, FPB& fpb) const;
+    //
+    void flushFPB () const;
 
     //
     // Keep track of how many FabArrays are built with the same BDKey.
@@ -1325,6 +1405,7 @@ FabArray<FAB>::clear ()
 		// and DistributionMapping, erase it from the cache.
 		flushTileArray();
 		flushFB();
+		flushFPB();
 	    }
 	}
     }
@@ -2131,8 +2212,8 @@ FabArray<FAB>::MoveAllFabs (const Array<int> &newDistMapArray)
     // ---- flush caches
     DistributionMapping::FlushCache();
     FabArrayBase::flushFBCache();
+    FabArrayBase::flushFPBCache();
     FabArrayBase::CPC::FlushCache();
-    //Geometry::FlushPIRMCache();  // ---- needs to be done externally
 
     if(lastFAPtr != 0) {
       lastFAPtr->ModifyDistributionMap().ReplaceCachedProcessorMap(newDistMapArray);
