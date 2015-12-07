@@ -125,14 +125,6 @@ public:
 	}
     }
     //
-    // Flush the cache of self-intersection info used by FillBoundary.
-    //
-    static void FlushSICache ();
-    //
-    // The size of the cache of self-intersection info.
-    //
-    static int SICacheSize ();
-    //
     // Some static member templates used throughout the code.
     //
     template<typename T>
@@ -218,32 +210,36 @@ public:
     //
     typedef CopyComTag::CopyComTagsContainer CopyComTagsContainer;
     typedef CopyComTag::MapOfCopyComTagContainers MapOfCopyComTagContainers;
+
     //
     // Used in caching self-intersection info for FillBoundary().
     //
-    struct SI
+    struct FB
     {
-        SI ();
+        FB () : nuse(-1), 
+		m_LocTags(0), 
+		m_SndTags(0), 
+		m_RcvTags(0), 
+		m_SndVols(0), 
+		m_RcvVols(0) { ; }
+	~FB () {
+	    delete m_LocTags;
+	    delete m_SndTags;
+	    delete m_RcvTags;
+	    delete m_SndVols;
+	    delete m_RcvVols;
+	}
 
-        SI (const BoxArray&            ba,
-            const DistributionMapping& dm,
-            int                        ngrow,
-            bool                       cross);
+	static int key (int ngrow, const IntVect& typ, bool cross) {
+	    return       10000*ngrow
+		+ D_TERM(1000*int(typ[0]),
+			 +100*int(typ[1]),
+			 +10*int(typ[2]))
+		+ int(cross);
+	}
 
-        ~SI ();
-
-        bool operator== (const SI& rhs) const;
-        bool operator!= (const SI& rhs) const { return !operator==(rhs); }
-
-        int bytes () const;
-        //
-        // Basic data.
-        //
-        BoxArray            m_ba;
-        DistributionMapping m_dm;
-        int                 m_ngrow;
-	int                 m_nuse;
-        bool                m_cross;
+	int                 nuse;
+	//
 	bool                m_threadsafe_loc;
 	bool                m_threadsafe_rcv;
         //
@@ -255,16 +251,9 @@ public:
         std::map<int,int>*         m_SndVols;
         std::map<int,int>*         m_RcvVols;
     };
-    //
-    // Some useful typedefs for the FillBoundary() cache.
-    //
-    typedef std::multimap<int,FabArrayBase::SI> FBCache;
 
-    typedef FBCache::iterator FBCacheIter;
+    const FB& getFB (bool cross) const;
 
-    static FBCache m_TheFBCache;
-
-    static CacheStats m_FBC_stats;
     //
     // When copy()ing from one FabArray to another we can do a copy or an add.
     //
@@ -358,10 +347,6 @@ public:
             procThatHasData(0) {}
     };
     //
-    // Returns cached self-intersection records or builds them.
-    //
-    static FBCacheIter TheFB (bool cross, const FabArrayBase& mf);
-    //
     // Default tilesize in MFIter
     //
     static IntVect mfiter_tile_size;
@@ -415,6 +400,9 @@ public:
 
     const TileArray* getTileArray (const IntVect& tilesize) const;
 
+    static void flushTileArrayCache ();
+    static void flushFBCache ();
+
 protected:
 
     DistributionMapping& ModifyDistributionMap () { return distributionMap; }
@@ -453,6 +441,9 @@ protected:
 	    }
     };
 
+    // 
+    // Tiling
+    //
     // We use tile size as the key for the inner map.
     typedef std::map<IntVect, TileArray, IntVect::Compare> TAMap;
     typedef std::map<BDKey  , TAMap    , CompareBDKey    > TACache;
@@ -463,8 +454,19 @@ protected:
     void buildTileArray (const IntVect& tilesize, TileArray& ta) const;
     //
     void flushTileArray (const IntVect& tilesize = IntVect::TheZeroVector()) const;
-    // This flushes the entire cache.
-    static void flushTileArrayCache ();
+
+    //
+    // FillBoundary
+    //
+    typedef std::map<int  , FB                 > FBMap;
+    typedef std::map<BDKey, FBMap, CompareBDKey> FBCache;
+    //
+    static FBCache     m_TheFBCache;
+    static CacheStats  m_FBC_stats;
+    //
+    void buildFB (bool cross, FB& fb) const;
+    //
+    void flushFB () const;
 
     //
     // Keep track of how many FabArrays are built with the same BDKey.
@@ -1320,8 +1322,9 @@ FabArray<FAB>::clear ()
 		m_BD_count.erase(cnt_it);
 		
 		// Since this is the last one built with these BoxArray 
-		// and DistributionMapping, erase it from the TileArray cache.
+		// and DistributionMapping, erase it from the cache.
 		flushTileArray();
+		flushFB();
 	    }
 	}
     }
@@ -2127,7 +2130,7 @@ FabArray<FAB>::MoveAllFabs (const Array<int> &newDistMapArray)
 
     // ---- flush caches
     DistributionMapping::FlushCache();
-    FabArrayBase::FlushSICache();
+    FabArrayBase::flushFBCache();
     FabArrayBase::CPC::FlushCache();
     //Geometry::FlushPIRMCache();  // ---- needs to be done externally
 
@@ -2933,24 +2936,20 @@ FabArray<FAB>::FillBoundary (int  scomp,
 
     if ( n_grow <= 0 ) return;
 
-    FabArrayBase::FBCacheIter cache_it = FabArrayBase::TheFB(cross,*this);
-
-    BL_ASSERT(cache_it != FabArrayBase::m_TheFBCache.end());
-
-    const FabArrayBase::SI& TheSI = cache_it->second;
+    const FabArrayBase::FB& TheFB = getFB(cross);
 
     if (ParallelDescriptor::NProcs() == 1)
     {
         //
         // There can only be local work to do.
         //
-	int N_loc = (*TheSI.m_LocTags).size();
+	int N_loc = (*TheFB.m_LocTags).size();
 #ifdef _OPENMP
-#pragma omp parallel for if (TheSI.m_threadsafe_loc)
+#pragma omp parallel for if (TheFB.m_threadsafe_loc)
 #endif
 	for (int i=0; i<N_loc; ++i)
         {
-            const CopyComTag& tag = (*TheSI.m_LocTags)[i];
+            const CopyComTag& tag = (*TheFB.m_LocTags)[i];
 
             BL_ASSERT(distributionMap[tag.fabIndex] == ParallelDescriptor::MyProc());
             BL_ASSERT(distributionMap[tag.srcIndex] == ParallelDescriptor::MyProc());
@@ -2968,7 +2967,7 @@ FabArray<FAB>::FillBoundary (int  scomp,
     //
     const int SeqNum = ParallelDescriptor::SeqNum();
 
-    if (TheSI.m_LocTags->empty() && TheSI.m_RcvTags->empty() && TheSI.m_SndTags->empty())
+    if (TheFB.m_LocTags->empty() && TheFB.m_RcvTags->empty() && TheFB.m_SndTags->empty())
         //
         // No work to do.
         //
@@ -2983,12 +2982,12 @@ FabArray<FAB>::FillBoundary (int  scomp,
     //
     value_type* the_recv_data = 0;
 
-    FabArrayBase::PostRcvs(*TheSI.m_RcvTags,*TheSI.m_RcvVols,the_recv_data,recv_data,recv_from,recv_reqs,ncomp,SeqNum);
+    FabArrayBase::PostRcvs(*TheFB.m_RcvTags,*TheFB.m_RcvVols,the_recv_data,recv_data,recv_from,recv_reqs,ncomp,SeqNum);
 
     //
     // Post send's
     //
-    const int N_snds = TheSI.m_SndTags->size();
+    const int N_snds = TheFB.m_SndTags->size();
 
     Array<value_type*>                 send_data;
     Array<int>                         send_N;
@@ -3000,14 +2999,14 @@ FabArray<FAB>::FillBoundary (int  scomp,
     send_rank.reserve(N_snds);
     send_cctc.reserve(N_snds);
 
-    for (MapOfCopyComTagContainers::const_iterator m_it = TheSI.m_SndTags->begin(),
-             m_End = TheSI.m_SndTags->end();
+    for (MapOfCopyComTagContainers::const_iterator m_it = TheFB.m_SndTags->begin(),
+             m_End = TheFB.m_SndTags->end();
          m_it != m_End;
          ++m_it)
     {
-	std::map<int,int>::const_iterator vol_it = TheSI.m_SndVols->find(m_it->first);
+	std::map<int,int>::const_iterator vol_it = TheFB.m_SndVols->find(m_it->first);
 
-        BL_ASSERT(vol_it != TheSI.m_SndVols->end());
+        BL_ASSERT(vol_it != TheFB.m_SndVols->end());
 
         const int N = vol_it->second*ncomp;
 
@@ -3061,13 +3060,13 @@ FabArray<FAB>::FillBoundary (int  scomp,
     //
     // Do the local work.  Hope for a bit of communication/computation overlap.
     //
-    int N_loc = (*TheSI.m_LocTags).size();
+    int N_loc = (*TheFB.m_LocTags).size();
 #ifdef _OPENMP
-#pragma omp parallel for if (TheSI.m_threadsafe_loc)
+#pragma omp parallel for if (TheFB.m_threadsafe_loc)
 #endif
     for (int i=0; i<N_loc; ++i)
     {
-        const CopyComTag& tag = (*TheSI.m_LocTags)[i];
+        const CopyComTag& tag = (*TheFB.m_LocTags)[i];
 
         BL_ASSERT(distributionMap[tag.fabIndex] == ParallelDescriptor::MyProc());
         BL_ASSERT(distributionMap[tag.srcIndex] == ParallelDescriptor::MyProc());
@@ -3079,7 +3078,7 @@ FabArray<FAB>::FillBoundary (int  scomp,
     //  wait and unpack
     //
 
-    const int N_rcvs = TheSI.m_RcvTags->size();
+    const int N_rcvs = TheFB.m_RcvTags->size();
 
     if (N_rcvs > 0)
     {
@@ -3088,8 +3087,8 @@ FabArray<FAB>::FillBoundary (int  scomp,
 
 	for (int k = 0; k < N_rcvs; k++) 
 	{
-	    MapOfCopyComTagContainers::const_iterator m_it = TheSI.m_RcvTags->find(recv_from[k]);
-	    BL_ASSERT(m_it != TheSI.m_RcvTags->end());
+	    MapOfCopyComTagContainers::const_iterator m_it = TheFB.m_RcvTags->find(recv_from[k]);
+	    BL_ASSERT(m_it != TheFB.m_RcvTags->end());
 	    
 	    recv_cctc.push_back(&(m_it->second));
 	}	
@@ -3098,7 +3097,7 @@ FabArray<FAB>::FillBoundary (int  scomp,
 	BL_MPI_REQUIRE( MPI_Waitall(N_rcvs, recv_reqs.dataPtr(), stats.dataPtr()) );
 
 #ifdef _OPENMP
-#pragma omp parallel for if (TheSI.m_threadsafe_rcv)
+#pragma omp parallel for if (TheFB.m_threadsafe_rcv)
 #endif
 	for (int k = 0; k < N_rcvs; k++) 
 	{
@@ -3120,8 +3119,8 @@ FabArray<FAB>::FillBoundary (int  scomp,
 
     BoxLib::The_Arena()->free(the_recv_data);
 
-    if (FabArrayBase::do_async_sends && !TheSI.m_SndTags->empty())
-        FabArrayBase::GrokAsyncSends(TheSI.m_SndTags->size(),send_reqs,send_data,stats);
+    if (FabArrayBase::do_async_sends && !TheFB.m_SndTags->empty())
+        FabArrayBase::GrokAsyncSends(TheFB.m_SndTags->size(),send_reqs,send_data,stats);
 
 #endif /*BL_USE_MPI*/
 }

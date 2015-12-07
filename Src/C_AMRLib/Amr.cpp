@@ -2231,7 +2231,7 @@ Amr::regrid (int  lbase,
     // We're most interesting in flushing cached stuff from the finer levels.
     // Lower level stuff that could be reused is just as easily rebuilt.
     //
-    MultiFab::FlushSICache();
+    FabArrayBase::flushFBCache();
     Geometry::FlushPIRMCache();
     FabArrayBase::CPC::FlushCache();
     DistributionMapping::FlushCache();

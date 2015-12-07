@@ -1364,12 +1364,8 @@ MultiFab::SumBoundary (int scomp,
     // receive the m_SndTags, and invert the sense of fabIndex and srcIndex
     // in the CopyComTags.
     //
-    MultiFab&                 mf       = *this;
-    FabArrayBase::FBCacheIter cache_it = FabArrayBase::TheFB(false,mf);
-
-    BL_ASSERT(cache_it != FabArrayBase::m_TheFBCache.end());
-
-    const FabArrayBase::SI& TheSI = cache_it->second;
+    MultiFab& mf = *this;
+    const FabArrayBase::FB& TheSI = getFB(false);
 
     if (ParallelDescriptor::NProcs() == 1)
     {
