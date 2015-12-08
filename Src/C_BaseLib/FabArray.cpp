@@ -439,9 +439,7 @@ FabArrayBase::Finalize ()
 {
     FabArrayBase::CPC::FlushCache();
 
-    FabArrayBase::flushTileArrayCache();
-    FabArrayBase::flushFBCache();
-    FabArrayBase::flushFPBCache();
+    FabArrayBase::flushCaches();
 
     if (ParallelDescriptor::IOProcessor()) {
 	m_FA_stats.print();

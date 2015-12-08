@@ -466,6 +466,11 @@ public:
 
     const TileArray* getTileArray (const IntVect& tilesize) const;
 
+    static void flushCaches() {
+	flushTileArrayCache();
+	flushFBCache();
+	flushFPBCache();
+    }
     static void flushTileArrayCache ();
     static void flushFBCache ();
     static void flushFPBCache ();
@@ -547,6 +552,12 @@ protected:
     void buildFPB (bool do_corners, const Geometry& geom, FPB& fpb) const;
     //
     void flushFPB () const;
+
+    void flush () const {
+	flushTileArray();
+	flushFB();
+	flushFPB();
+    }
 
     //
     // Keep track of how many FabArrays are built with the same BDKey.
@@ -1403,9 +1414,7 @@ FabArray<FAB>::clear ()
 		
 		// Since this is the last one built with these BoxArray 
 		// and DistributionMapping, erase it from the cache.
-		flushTileArray();
-		flushFB();
-		flushFPB();
+		flush();
 	    }
 	}
     }
@@ -2211,8 +2220,7 @@ FabArray<FAB>::MoveAllFabs (const Array<int> &newDistMapArray)
 
     // ---- flush caches
     DistributionMapping::FlushCache();
-    FabArrayBase::flushFBCache();
-    FabArrayBase::flushFPBCache();
+    FabArrayBase::flushCaches();
     FabArrayBase::CPC::FlushCache();
 
     if(lastFAPtr != 0) {
