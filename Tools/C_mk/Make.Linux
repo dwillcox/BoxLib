@@ -60,6 +60,7 @@ ifeq ($(COMP),Cray)
 
 else
 ifeq ($(COMP),PGI)
+  CC  = pgcc
   CXX = pgc++
   CXXDEBF += -g -O0
 
